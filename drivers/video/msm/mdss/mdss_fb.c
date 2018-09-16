@@ -2,7 +2,7 @@
  * Core MDSS framebuffer driver.
  *
  * Copyright (C) 2007 Google Incorporated
- * Copyright (c) 2008-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2008-2018, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -54,10 +54,6 @@
 #include "mdss_fb.h"
 #include "mdss_mdp_splash_logo.h"
 
-#ifdef CONFIG_FB_LENOVO_LCD_EFFECT
-#include "lenovo_lcd_effect/lenovo_fb.h"
-#endif
-
 #ifdef CONFIG_FB_MSM_TRIPLE_BUFFER
 #define MDSS_FB_NUM 3
 #else
@@ -72,7 +68,6 @@
 
 #define BLANK_FLAG_LP	FB_BLANK_VSYNC_SUSPEND
 #define BLANK_FLAG_ULP	FB_BLANK_NORMAL
-#define BACKLIGHT_BRIGHTNESS_LK 0x29//lenovo.sw2 houdz1 add for AD!
 
 static struct fb_info *fbi_list[MAX_FBI_LIST];
 static int fbi_list_index;
@@ -526,13 +521,14 @@ static ssize_t mdss_fb_get_panel_info(struct device *dev,
 			"pu_en=%d\nxstart=%d\nwalign=%d\nystart=%d\nhalign=%d\n"
 			"min_w=%d\nmin_h=%d\nroi_merge=%d\ndyn_fps_en=%d\n"
 			"min_fps=%d\nmax_fps=%d\npanel_name=%s\n"
-			"primary_panel=%d\n",
+			"primary_panel=%d\nidle_fps=%d\n",
 			pinfo->partial_update_enabled, pinfo->xstart_pix_align,
 			pinfo->width_pix_align, pinfo->ystart_pix_align,
 			pinfo->height_pix_align, pinfo->min_width,
 			pinfo->min_height, pinfo->partial_update_roi_merge,
 			pinfo->dynamic_fps, pinfo->min_fps, pinfo->max_fps,
-			pinfo->panel_name, pinfo->is_prim_panel);
+			pinfo->panel_name, pinfo->is_prim_panel,
+			pinfo->idle_fps);
 
 	return ret;
 }
@@ -685,39 +681,7 @@ static ssize_t mdss_fb_get_doze_mode(struct device *dev,
 
 	return scnprintf(buf, PAGE_SIZE, "%d\n", mfd->doze_mode);
 }
-/*lenovo.sw2 houdz1 add  (begin)*/
-int ISL98608_ID = 1;
-static int __init board_ISL98608ID_setup(char *isl98608id)
-{
-	sscanf(isl98608id, "%d", &ISL98608_ID);
-	printk("##%s: get isl98608id from lk: str: %s  to numID: %d\n", __func__, isl98608id, ISL98608_ID);
-	return 1;
-}
-__setup("androidboot.isl98608id=", board_ISL98608ID_setup);
 
-static ssize_t lenovo_get_ISL98608_ID(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	ssize_t ret;
-         if(ISL98608_ID == 1)
-	    ret = snprintf(buf, PAGE_SIZE, "1\n");
-         else
-	    ret = snprintf(buf, PAGE_SIZE, "2\n");
-	return ret;
-}
-static ssize_t mdss_fb_get_panel_name(struct device *dev,struct device_attribute *attr, char *buf)
-{
-	struct fb_info *fbi = dev_get_drvdata(dev);
-	struct msm_fb_data_type *mfd = fbi->par;
-	struct mdss_panel_data *pdata;
-
-	pdata = dev_get_platdata(&mfd->pdev->dev);
-
-	if(pdata) 	return scnprintf(buf, PAGE_SIZE, "%s\n", pdata->panel_info.panel_name);
-	else 	return scnprintf(buf, PAGE_SIZE, "%s\n", "NULL");
-
-}
-static DEVICE_ATTR(lcd_name, S_IRUGO, mdss_fb_get_panel_name, NULL);
-static DEVICE_ATTR(isl98608_id, S_IRUGO | S_IWUSR | S_IWGRP,  lenovo_get_ISL98608_ID, NULL);
 static DEVICE_ATTR(msm_fb_type, S_IRUGO, mdss_fb_get_type, NULL);
 static DEVICE_ATTR(msm_fb_split, S_IRUGO | S_IWUSR, mdss_fb_show_split,
 					mdss_fb_store_split);
@@ -745,8 +709,6 @@ static struct attribute *mdss_fb_attrs[] = {
 	&dev_attr_msm_fb_thermal_level.attr,
 	&dev_attr_always_on.attr,
 	&dev_attr_msm_fb_panel_status.attr,
-	&dev_attr_lcd_name.attr,
-	&dev_attr_isl98608_id.attr,
 	NULL,
 };
 
@@ -889,8 +851,7 @@ static int mdss_fb_probe(struct platform_device *pdev)
 
 	/* android supports only one lcd-backlight/lcd for now */
 	if (!lcd_backlight_registered) {
-		//backlight_led.brightness = mfd->panel_info->brightness_max;
-		backlight_led.brightness = BACKLIGHT_BRIGHTNESS_LK;//lenovo.sw2 houdz1 add for AD!
+		backlight_led.brightness = mfd->panel_info->brightness_max;
 		backlight_led.max_brightness = mfd->panel_info->brightness_max;
 		if (led_classdev_register(&pdev->dev, &backlight_led))
 			pr_err("led_classdev_register failed\n");
@@ -1210,11 +1171,20 @@ void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 	if ((bkl_lvl == 0) && (mfd->doze_mode)) {
 		pr_debug("keeping backlight on with always-on displays\n");
 		mfd->unset_bl_level = 0;
+#ifdef CONFIG_MACH_WT86518
+		if(bkl_lvl==0)
+                    {  pdata = dev_get_platdata(&mfd->pdev->dev);
+                        pdata->set_backlight(pdata, bkl_lvl);  
+                    }	
+#endif
 		return;
 	}
 
-	if ((((mdss_fb_is_power_off(mfd) && mfd->dcm_state != DCM_ENTER)
+	if (
+#ifndef CONFIG_LEDS_TRIGGER_BACKLIGHT
+		(((mdss_fb_is_power_off(mfd) && mfd->dcm_state != DCM_ENTER)
 		|| !mfd->allow_bl_update) && !IS_CALIB_MODE_BL(mfd)) ||
+#endif
 		mfd->panel_info->cont_splash_enabled) {
 		mfd->unset_bl_level = bkl_lvl;
 		return;
@@ -1307,9 +1277,10 @@ static void mdss_fb_stop_disp_thread(struct msm_fb_data_type *mfd)
 {
 	pr_debug("%pS: stop display thread fb%d\n",
 		__builtin_return_address(0), mfd->index);
-
+	mutex_lock(&mfd->mdp_sync_pt_data.sync_mutex);
 	kthread_stop(mfd->disp_thread);
 	mfd->disp_thread = NULL;
+	mutex_unlock(&mfd->mdp_sync_pt_data.sync_mutex);
 }
 
 static void mdss_panel_validate_debugfs_info(struct msm_fb_data_type *mfd)
@@ -2784,10 +2755,12 @@ static int mdss_fb_pan_display_ex(struct fb_info *info,
 	mfd->msm_fb_backup.info = *info;
 	mfd->msm_fb_backup.disp_commit = *disp_commit;
 
-	atomic_inc(&mfd->mdp_sync_pt_data.commit_cnt);
-	atomic_inc(&mfd->commits_pending);
-	atomic_inc(&mfd->kickoff_pending);
-	wake_up_all(&mfd->commit_wait_q);
+	if (mfd->disp_thread) {
+		atomic_inc(&mfd->mdp_sync_pt_data.commit_cnt);
+		atomic_inc(&mfd->commits_pending);
+		atomic_inc(&mfd->kickoff_pending);
+		wake_up_all(&mfd->commit_wait_q);
+	}
 	mutex_unlock(&mfd->mdp_sync_pt_data.sync_mutex);
 	if (wait_for_finish)
 		mdss_fb_pan_idle(mfd);
@@ -2930,9 +2903,14 @@ static int __mdss_fb_display_thread(void *data)
 				mfd->index);
 
 	while (1) {
-		wait_event(mfd->commit_wait_q,
+		ret = wait_event_interruptible(mfd->commit_wait_q,
 				(atomic_read(&mfd->commits_pending) ||
 				 kthread_should_stop()));
+
+		if (ret) {
+			pr_info("%s: interrupted", __func__);
+			continue;
+		}
 
 		if (kthread_should_stop())
 			break;
@@ -3544,15 +3522,6 @@ int mdss_fb_do_ioctl(struct fb_info *info, unsigned int cmd,
 
 		ret = mdss_fb_lpm_enable(mfd, dsi_mode);
 		break;
-
-/*begin:lenovo.sw2 houdz1 add lenovo lcd effect*/
-#ifdef CONFIG_FB_LENOVO_LCD_EFFECT
-	case MSMFB_PANEL_EFFECT:
-		//if(mdss_fb_is_power_on(mfd))
-			ret = lenovo_fb_panel_effect(mfd, argp);
-		break;
-#endif
-/*end:lenovo.sw2 houdz1 add lenovo lcd effect*/
 
 	default:
 		if (mfd->mdp.ioctl_handler)

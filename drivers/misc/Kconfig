@@ -619,17 +619,17 @@ config QCOM_LIQUID_DOCK
 	  This option enables support for the USB and Ethernet ports found on
 	  the docking station of various models of Qualcomm Technology's
 	  LiQUID Mobile Development Platforms.
+
+config HARDWARE_INFO
+	tristate "Wingtech Hardware Information support"
+	help
+	  This option enables device driver to initial the hardware info module.
+
 config UID_CPUTIME
 	tristate "Per-UID cpu time statistics"
 	depends on PROFILING
 	help
 	  Per UID based cpu time statistics exported to /proc/uid_cputime
-	  
-config NXP_TFA9887
-	tristate "NXP TFA9887 Support"
-	depends on I2C
-	help
-	  The NXP TFA9887 chip is used as a smart PA Controller.	  
 
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"

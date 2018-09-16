@@ -47,7 +47,7 @@ struct panel_id {
 
 static inline const char *mdss_panel2str(u32 panel)
 {
-	static const char const *names[] = {
+	static const char *names[] = {
 #define PANEL_NAME(n) [n ## _PANEL] = __stringify(n)
 		PANEL_NAME(MIPI_VIDEO),
 		PANEL_NAME(MIPI_CMD),
@@ -215,9 +215,6 @@ enum mdss_intf_events {
 	MDSS_EVENT_DSI_DYNAMIC_SWITCH,
 	MDSS_EVENT_REGISTER_RECOVERY_HANDLER,
 	MDSS_EVENT_DSI_PANEL_STATUS,
-	#ifdef CONFIG_FB_LENOVO_LCD_EFFECT
-	MDSS_EVENT_LENOVO_PANEL_EFFECT,/*lenovo.sw2 houdz add for lcd effect*/
-	#endif
 };
 
 struct lcd_panel_info {
@@ -415,6 +412,7 @@ struct mdss_panel_info {
 	u32 min_height;
 	u32 min_fps;
 	u32 max_fps;
+	u32 idle_fps;
 
 	u32 cont_splash_enabled;
 	bool esd_rdy;

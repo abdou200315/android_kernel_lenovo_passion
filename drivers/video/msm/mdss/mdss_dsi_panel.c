@@ -21,9 +21,12 @@
 #include <linux/leds.h>
 #include <linux/qpnp/pwm.h>
 #include <linux/err.h>
-#include <linux/display_state.h>
 
 #include "mdss_dsi.h"
+
+#ifdef CONFIG_MACH_WT86518
+#include <linux/hardware_info.h>
+#endif
 
 #define DT_CMD_HDR 6
 
@@ -36,14 +39,11 @@
 #define MIN_REFRESH_RATE 48
 #define DEFAULT_MDP_TRANSFER_TIME 14000
 
-bool display_on = true;
-
-bool is_display_on()
-{
-	return display_on;
-}
-
 DEFINE_LED_TRIGGER(bl_led_trigger);
+
+#ifdef CONFIG_MACH_WT86518
+extern bool is_Lcm_Present;
+#endif
 
 void mdss_dsi_panel_pwm_cfg(struct mdss_dsi_ctrl_pdata *ctrl)
 {
@@ -55,7 +55,13 @@ void mdss_dsi_panel_pwm_cfg(struct mdss_dsi_ctrl_pdata *ctrl)
 		pr_err("%s: Error: lpg_chan=%d pwm request failed",
 				__func__, ctrl->pwm_lpg_chan);
 	}
+
+#ifdef CONFIG_MACH_WT86518
+	ctrl->pwm_enabled = 1;
+#else
 	ctrl->pwm_enabled = 0;
+#endif
+
 }
 
 static void mdss_dsi_panel_bklt_pwm(struct mdss_dsi_ctrl_pdata *ctrl, int level)
@@ -201,8 +207,7 @@ static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 			return;
 	}
 
-	//pr_debug("%s: level=%d\n", __func__, level);
-	printk("[houdz1]%s: pid =%d name= %s  level=%d\n", __func__, current->pid,current->comm,level);//lenoco.sw2 houdz1 add
+	pr_debug("%s: level=%d\n", __func__, level);
 
 	led_pwm1[1] = (unsigned char)level;
 
@@ -220,20 +225,6 @@ static int mdss_dsi_request_gpios(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
 	int rc = 0;
 
-	if (gpio_is_valid(ctrl_pdata->disp_vsp_gpio)) {
-		rc = gpio_request(ctrl_pdata->disp_vsp_gpio,	"disp_vsp");
-		if (rc) {
-			pr_err("request disp_vsp gpio failed, rc=%d\n", rc);
-			goto disp_vsp_gpio_err;
-		}
-	}
-	if (gpio_is_valid(ctrl_pdata->disp_vsn_gpio)) {
-		rc = gpio_request(ctrl_pdata->disp_vsn_gpio, "disp_vsn");
-		if (rc) {
-			pr_err("request disp_vsn gpio failed, rc=%d\n", rc);
-			goto disp_vsn_gpio_err;
-		}
-	}
 	if (gpio_is_valid(ctrl_pdata->disp_en_gpio)) {
 		rc = gpio_request(ctrl_pdata->disp_en_gpio,
 						"disp_enable");
@@ -277,23 +268,14 @@ rst_gpio_err:
 	if (gpio_is_valid(ctrl_pdata->disp_en_gpio))
 		gpio_free(ctrl_pdata->disp_en_gpio);
 disp_en_gpio_err:
-	if (gpio_is_valid(ctrl_pdata->disp_vsn_gpio))
-		gpio_free(ctrl_pdata->disp_vsn_gpio);
-disp_vsn_gpio_err:
-	if (gpio_is_valid(ctrl_pdata->disp_vsp_gpio))
-		gpio_free(ctrl_pdata->disp_vsp_gpio);
-disp_vsp_gpio_err:
 	return rc;
 }
 
-extern int lm36923_config_20ma(void);//lenovo.sw2 houdz1 add
 int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 	struct mdss_panel_info *pinfo = NULL;
 	int i, rc = 0;
-
-	printk("%s:enable = %d start\n",__func__,enable);
 
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
@@ -327,18 +309,6 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 			if (gpio_is_valid(ctrl_pdata->disp_en_gpio))
 				gpio_set_value((ctrl_pdata->disp_en_gpio), 1);
 
-			/* lenovo.sw2 houdz1 add for lcd VSP/VSN enable begin*/
-			if (gpio_is_valid(ctrl_pdata->rst_gpio))
-				gpio_direction_output((ctrl_pdata->rst_gpio), 0);
-			mdelay(1);
-			if (gpio_is_valid(ctrl_pdata->disp_vsp_gpio))
-				gpio_direction_output((ctrl_pdata->disp_vsp_gpio), 1);
-				mdelay(1);
-			if (gpio_is_valid(ctrl_pdata->disp_vsn_gpio))
-				gpio_direction_output((ctrl_pdata->disp_vsn_gpio), 1);
-				mdelay(15);
-			/* lenovo.sw2 houdz1 add for lcd VSP/VSN enable end*/
-
 			for (i = 0; i < pdata->panel_info.rst_seq_len; ++i) {
 				gpio_set_value((ctrl_pdata->rst_gpio),
 					pdata->panel_info.rst_seq[i]);
@@ -348,7 +318,6 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 
 			if (gpio_is_valid(ctrl_pdata->bklt_en_gpio))
 				gpio_set_value((ctrl_pdata->bklt_en_gpio), 1);
-			if(lm36923_config_20ma()) pr_err("i2c lm36923 config fail!now the max current is 25mA\n");//lenovo.sw2 houdz1 add
 		}
 
 		if (gpio_is_valid(ctrl_pdata->mode_gpio)) {
@@ -376,18 +345,7 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 		gpio_free(ctrl_pdata->rst_gpio);
 		if (gpio_is_valid(ctrl_pdata->mode_gpio))
 			gpio_free(ctrl_pdata->mode_gpio);
-		/*lenovo.sw2 houdz1 add : add "disp_vsp_gpio" and "disp_vsp_gpio "begin*/
-		if (gpio_is_valid(ctrl_pdata->disp_vsp_gpio)) {
-			gpio_set_value((ctrl_pdata->disp_vsp_gpio), 0);
-			gpio_free(ctrl_pdata->disp_vsp_gpio);
-		}
-		if (gpio_is_valid(ctrl_pdata->disp_vsn_gpio)) {
-			gpio_set_value((ctrl_pdata->disp_vsn_gpio), 0);
-			gpio_free(ctrl_pdata->disp_vsn_gpio);
-		}
-		/*lenovo.sw2 houdz1 add : add "disp_vsp_gpio" and "disp_vsp_gpio "end*/
 	}
-	printk("%s:enable = %d end\n",__func__,enable);
 	return rc;
 }
 
@@ -653,25 +611,15 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 	}
 }
 
-/*lenovo.sw2 houdz1 add  begin*/
-#ifdef CONFIG_FB_LENOVO_LCD_EFFECT
-extern int lenovo_updata_effect_code(struct mdss_dsi_ctrl_pdata *ctrl_data);
-#endif
-/*lenovo.sw2 houdz1 add  end*/
 static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl = NULL;
 	struct mdss_panel_info *pinfo;
-#ifdef CONFIG_FB_LENOVO_LCD_EFFECT
-	struct dsi_panel_cmds saveCmds;//lenovo.sw2 houdz1 add
-#endif
 
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
 		return -EINVAL;
 	}
-
-	display_on = true;
 
 	pinfo = &pdata->panel_info;
 	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata,
@@ -684,20 +632,8 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 			goto end;
 	}
 
-/*lenovo.sw2 houdz1 add  begin*/
-
-
-#ifdef CONFIG_FB_LENOVO_LCD_EFFECT
-	saveCmds.cmds = ctrl->on_cmds.cmds;
-	saveCmds.cmd_cnt= ctrl->on_cmds.cmd_cnt;
-	lenovo_updata_effect_code(ctrl);
-	mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
-	ctrl->on_cmds.cmds = saveCmds.cmds;
-	ctrl->on_cmds.cmd_cnt = saveCmds.cmd_cnt;
-#else
 	if (ctrl->on_cmds.cmd_cnt)
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
-#endif
 
 end:
 	pinfo->blank_state = MDSS_PANEL_BLANK_UNBLANK;
@@ -751,8 +687,6 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 		return -EINVAL;
 	}
 
-	display_on = false;
-
 	pinfo = &pdata->panel_info;
 	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
@@ -773,6 +707,7 @@ end:
 	return 0;
 }
 
+#ifndef CONFIG_MACH_WT86518
 static int mdss_dsi_panel_low_power_config(struct mdss_panel_data *pdata,
 	int enable)
 {
@@ -800,6 +735,8 @@ static int mdss_dsi_panel_low_power_config(struct mdss_panel_data *pdata,
 	pr_debug("%s:-\n", __func__);
 	return 0;
 }
+// We dont need this on a6000 (SOT LAGANI HAI!)
+#endif
 
 static void mdss_dsi_parse_lane_swap(struct device_node *np, char *dlane_swap)
 {
@@ -1131,6 +1068,7 @@ static int mdss_dsi_parse_reset_seq(struct device_node *np,
 	return 0;
 }
 
+#ifndef CONFIG_MACH_WT86518
 static int mdss_dsi_gen_read_status(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
 	if (ctrl_pdata->status_buf.data[0] !=
@@ -1174,6 +1112,7 @@ static int mdss_dsi_nt35596_read_status(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 		return 1;
 	}
 }
+#endif
 
 static void mdss_dsi_parse_roi_alignment(struct device_node *np,
 		struct mdss_panel_info *pinfo)
@@ -1337,6 +1276,7 @@ static int mdss_dsi_set_refresh_rate_range(struct device_node *pan_node,
 		struct mdss_panel_info *pinfo)
 {
 	int rc = 0;
+	u32 tmp = 0;
 	rc = of_property_read_u32(pan_node,
 			"qcom,mdss-dsi-min-refresh-rate",
 			&pinfo->min_fps);
@@ -1366,6 +1306,13 @@ static int mdss_dsi_set_refresh_rate_range(struct device_node *pan_node,
 		 */
 		pinfo->max_fps = pinfo->mipi.frame_rate;
 		rc = 0;
+	}
+
+	rc = of_property_read_u32(pan_node,
+			"qcom,mdss-dsi-idle-refresh-rate",
+			&tmp);
+	if (rc == 0 && tmp >= pinfo->min_fps && tmp <= pinfo->max_fps) {
+		pinfo->idle_fps = tmp;
 	}
 
 	pr_info("dyn_fps: min = %d, max = %d\n",
@@ -1538,6 +1485,52 @@ static void mdss_dsi_set_lane_clamp_mask(struct mipi_panel_info *mipi)
 	mipi->phy_lane_clamp_mask = mask;
 }
 
+#ifdef CONFIG_MACH_WT86518
+void mdss_dsi_parse_status_command(struct device_node *np, struct mdss_dsi_ctrl_pdata *ctrl_pdata)
+{
+	int i=0;
+	char cmd_key[] = "qcom,mdss-dsi-panel-status-command1";
+	int cmd_len = strlen(cmd_key);
+	for(i = 1;i <= ctrl_pdata->status_cmds_num;i++)
+	{
+		cmd_key[cmd_len-1] = i + '0';
+		mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->status_cmds[i-1],
+			cmd_key, "qcom,mdss-dsi-panel-status-command-state");
+	}
+}
+int mdss_dsi_parse_status_value(struct device_node *np, struct mdss_dsi_ctrl_pdata *ctrl_pdata)
+{
+	int len = 0;
+	int i = 0,rc=0;
+	struct property *data;
+	char cmd_key[] = "qcom,mdss-dsi-panel-status-value1";
+	int j = 1;
+	u32 sta_val[5];
+	int cmd_len = strlen(cmd_key);
+
+	for(j = 1;j <= ctrl_pdata->status_cmds_num;j++)
+	{
+		cmd_key[cmd_len-1] = j + '0';
+		data = of_find_property(np, cmd_key, &len);
+		len /= sizeof(u32);
+		if (!data ) {
+			pr_err("%s: failed, key=%s\n", __func__, cmd_key);
+			return 0;
+		} else {
+			rc = of_property_read_u32_array(np,cmd_key,sta_val,len);
+			if (rc)
+			{
+				pr_err("%s: Error reading qcom,mdss-dsi-panel-status-value",__func__);
+				return 0;
+			} else {
+				for(i=0;i<len;i++)
+				ctrl_pdata->status_value[j-1][i]= sta_val[i];
+			}
+		}
+	}
+	return 1;
+}
+#endif
 
 static int mdss_panel_parse_dt(struct device_node *np,
 			struct mdss_dsi_ctrl_pdata *ctrl_pdata)
@@ -1598,12 +1591,6 @@ static int mdss_panel_parse_dt(struct device_node *np,
 	data = of_get_property(np, "qcom,mdss-dsi-panel-type", NULL);
 	if (data && !strncmp(data, "dsi_cmd_mode", 12))
 		pinfo->mipi.mode = DSI_CMD_MODE;
-	/*lenovo.sw2 houdz1 add begin*/
-	tmp = 0;
-	rc = of_property_read_u32(np, "lenovo,panel_id", &tmp);
-	ctrl_pdata->panel_id = (!rc ? tmp : 0);
-
-	/*lenovo.sw2 houdz1 add end*/
 	tmp = 0;
 	data = of_get_property(np, "qcom,mdss-dsi-pixel-packing", NULL);
 	if (data && !strcmp(data, "loose"))
@@ -1876,12 +1863,26 @@ static int mdss_panel_parse_dt(struct device_node *np,
 	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->off_cmds,
 		"qcom,mdss-dsi-off-command", "qcom,mdss-dsi-off-command-state");
 
+#ifdef CONFIG_MACH_WT86518
+
+	rc = of_property_read_u32(np, "qcom,mdss-dsi-panel-status-command-num", &tmp);
+	ctrl_pdata->status_cmds_num = (!rc ? tmp : 0);
+	mdss_dsi_parse_status_command(np, ctrl_pdata);
+	rc = mdss_dsi_parse_status_value(np, ctrl_pdata);
+
+	if (!rc) {
+
+		pr_err("%s: failed to parse panel status_value\n", __func__);
+		goto error;
+
+	}
+#else
 	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->status_cmds,
 			"qcom,mdss-dsi-panel-status-command",
 				"qcom,mdss-dsi-panel-status-command-state");
 	rc = of_property_read_u32(np, "qcom,mdss-dsi-panel-status-value", &tmp);
 	ctrl_pdata->status_value = (!rc ? tmp : 0);
-
+#endif
 
 	ctrl_pdata->status_mode = ESD_MAX;
 	rc = of_property_read_string(np,
@@ -1891,27 +1892,31 @@ static int mdss_panel_parse_dt(struct device_node *np,
 			ctrl_pdata->status_mode = ESD_BTA;
 		} else if (!strcmp(data, "reg_read")) {
 			ctrl_pdata->status_mode = ESD_REG;
+#ifdef CONFIG_MACH_WT86518
+			ctrl_pdata->status_cmds_rlen = 4;
+#else
 			ctrl_pdata->status_cmds_rlen = 1;
 			ctrl_pdata->check_read_status =
 						mdss_dsi_gen_read_status;
+#endif
 		} else if (!strcmp(data, "reg_read_nt35596")) {
 			ctrl_pdata->status_mode = ESD_REG_NT35596;
 			ctrl_pdata->status_error_count = 0;
 			ctrl_pdata->status_cmds_rlen = 8;
+#ifdef CONFIG_MACH_WT86518
+		} else if (!strcmp(data, "te_signal_check")) {
+#else
 			ctrl_pdata->check_read_status =
 						mdss_dsi_nt35596_read_status;
+#endif
 		} else if (!strcmp(data, "te_signal_check")) {
 			if (pinfo->mipi.mode == DSI_CMD_MODE)
 				ctrl_pdata->status_mode = ESD_TE;
 			else
 				pr_err("TE-ESD not valid for video mode\n");
 		}
-		/*begin:lenovo.sw2 houdz1 add for p1 esd check*/
-		else if (!strcmp(data, "video_te_signal_check")) {
-				ctrl_pdata->status_mode = ESD_TE;
-		}
-		/*end:lenovo.sw2 houdz1 add for p1 esd check*/
 	}
+
 	pinfo->mipi.force_clk_lane_hs = of_property_read_bool(np,
 		"qcom,mdss-dsi-force-clock-lane-hs");
 
@@ -1928,35 +1933,62 @@ static int mdss_panel_parse_dt(struct device_node *np,
 
 	mdss_dsi_parse_dfps_config(np, ctrl_pdata);
 
-
-	/*lenovo.sw2 houdz1 add for lcd effect(start)*/
-	#ifdef CONFIG_FB_LENOVO_LCD_EFFECT
-	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->custom_mode_cmds,
-		"lenovo,lcd-effect-custom-mode-command", "lenovo,lcd-effect-custom-mode-command-state");
-	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->default_mode_cmds,
-		"lenovo,lcd-effect-default-mode-command", "lenovo,lcd-effect-default-mode-command-state");
-	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->comfort_mode_cmds,
-		"lenovo,lcd-effect-comfort-mode-command", "lenovo,lcd-effect-comfort-mode-command-state");
-	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->outside_mode_cmds,
-		"lenovo,lcd-effect-outside-mode-command", "lenovo,lcd-effect-outside-mode-command-state");
-	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->ultra_mode_cmds,
-		"lenovo,lcd-effect-ultra-mode-command", "lenovo,lcd-effect-ultra-mode-command-state");
-	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->camera_mode_cmds,
-		"lenovo,lcd-effect-camera-mode-command", "lenovo,lcd-effect-camera-mode-command-state");
-	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->gamma_cmds,
-		"lenovo,lcd-effect-gamma-command", "lenovo,lcd-effect-gamma-command-state");
-
-	rc = of_property_read_u32(np, "lenovo,lcd-effect-gamma-command-count", &tmp);
-	ctrl_pdata->gamma_count = (!rc ? tmp : 0);
-	printk("[houdz1]%s,gamma_cmds_cnt = %d ,gamma_cnt = %d, panel_id=%d\n",__func__,ctrl_pdata->gamma_cmds.cmd_cnt,ctrl_pdata->gamma_count,ctrl_pdata->panel_id);
-	ctrl_pdata->is_ultra_mode = 0;
-	#endif
-	/*lenovo.sw2 houdz1 add for lcd effect(end)*/
 	return 0;
 
 error:
 	return -EINVAL;
 }
+
+#ifdef CONFIG_MACH_WT86518
+#ifdef LCM_SUPPORT_READ_VERSION
+static int mdss_panel_parse_panel_name(struct device_node *node)
+{
+	const char *name;
+
+	name = of_get_property(node,
+						//"label", NULL);
+						"qcom,mdss-dsi-panel-name", NULL);
+	strcpy(g_lcm_id, name);
+	return 0;
+}
+
+static ssize_t msm_fb_lcd_name(struct device *dev,
+				  struct device_attribute *attr, char *buf)
+{
+	ssize_t ret = 0;
+
+	sprintf(buf, "%s\n", g_lcm_id);
+	ret = strlen(buf) + 1;
+
+	return ret;
+}
+
+static DEVICE_ATTR(lcd_name, 0644, msm_fb_lcd_name, NULL);
+static struct kobject *msm_lcd_name;
+static int msm_lcd_name_create_sysfs(void)
+{
+	int ret ;
+
+	msm_lcd_name = kobject_create_and_add("android_lcd", NULL);
+	if (msm_lcd_name == NULL) {
+		pr_info("msm_lcd_name_create_sysfs	failed!\n");
+		ret = -ENOMEM;
+		return ret ;
+	}
+
+	ret = sysfs_create_file(msm_lcd_name, &dev_attr_lcd_name.attr);
+	if (ret) {
+		pr_info("%s failed\n",__func__);
+		kobject_del(msm_lcd_name);
+	}
+	return 0 ;
+}
+#endif
+#endif
+
+#ifdef CONFIG_MACH_WT86518
+extern char Lcm_name[HARDWARE_MAX_ITEM_LONGTH];
+#endif
 
 int mdss_dsi_panel_init(struct device_node *node,
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata,
@@ -1982,7 +2014,22 @@ int mdss_dsi_panel_init(struct device_node *node,
 	} else {
 		pr_info("%s: Panel Name = %s\n", __func__, panel_name);
 		strlcpy(&pinfo->panel_name[0], panel_name, MDSS_MAX_PANEL_LEN);
+
+#ifdef CONFIG_MACH_WT86518
+		strcpy(Lcm_name,panel_name);
+#endif
 	}
+
+#ifdef CONFIG_MACH_WT86518
+#ifdef LCM_SUPPORT_READ_VERSION
+		rc = mdss_panel_parse_panel_name(node);
+		if (rc) {
+			pr_err("fail to parse panel label\n");
+			return rc;
+		}
+#endif
+#endif
+
 	rc = mdss_panel_parse_dt(node, ctrl_pdata);
 	if (rc) {
 		pr_err("%s:%d panel dt parse failed\n", __func__, __LINE__);
@@ -2002,7 +2049,14 @@ int mdss_dsi_panel_init(struct device_node *node,
 	ctrl_pdata->on = mdss_dsi_panel_on;
 	ctrl_pdata->post_panel_on = mdss_dsi_post_panel_on;
 	ctrl_pdata->off = mdss_dsi_panel_off;
+#ifdef CONFIG_MACH_WT86518
+	if(is_Lcm_Present)
+	{
+	ctrl_pdata->panel_data.set_backlight = mdss_dsi_panel_bl_ctrl;
+	}
+#else
 	ctrl_pdata->low_power_config = mdss_dsi_panel_low_power_config;
+#endif
 	ctrl_pdata->panel_data.set_backlight = mdss_dsi_panel_bl_ctrl;
 	ctrl_pdata->switch_mode = mdss_dsi_panel_switch_mode;
 
