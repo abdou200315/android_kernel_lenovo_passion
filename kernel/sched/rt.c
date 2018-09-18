@@ -859,7 +859,7 @@ static void dump_throttled_rt_tasks(struct rt_rq *rt_rq)
 out:
 #ifdef CONFIG_PANIC_ON_RT_THROTTLING
 	/*
-	 * Use pr_err() in the BUG() case since printk_deferred() will
+	 * Use pr_err() in the BUG() case since printk_sched() will
 	 * not get flushed and deadlock is not a concern.
 	 */
 	pr_err("%s", buf);
@@ -899,7 +899,6 @@ static int sched_rt_runtime_exceeded(struct rt_rq *rt_rq)
 			if (!once) {
 				once = true;
 				dump_throttled_rt_tasks(rt_rq);
-				printk_deferred("sched: RT throttling activated\n");
 			}
 		} else {
 			/*
